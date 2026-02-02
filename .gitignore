@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.ruff_cache/
+.pytest_cache/
+
+# Project Specific
+*.wav
+*.txt
+*.bat
+!Launch_MCP_TTS.bat
+!Start_MCP_Server.bat
+!start_fish_speech_server.bat
+uv.lock
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
