@@ -132,12 +132,16 @@ class EdgeTTSEngine(TTSEngine):
         try:
             await communicate.save(temp_mp3_path)
             
-            # Get audio data and play
-            audio_data, sample_rate = await self._load_and_play_mp3(
-                temp_mp3_path, 
-                use_direct_playback, 
-                settings.volume
-            )
+            # Read back file
+            with open(temp_mp3_path, "rb") as f:
+                mp3_data = f.read()
+            
+            # Decode MP3 to PCM
+            audio_data, sample_rate = await self._decode_mp3(mp3_data)
+            
+            # Direct playback if requested
+            if use_direct_playback:
+                await self._play_audio(audio_data, sample_rate)
         finally:
             # Clean up temp file
             if os.path.exists(temp_mp3_path):

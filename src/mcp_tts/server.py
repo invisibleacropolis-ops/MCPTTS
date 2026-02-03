@@ -108,6 +108,9 @@ async def talk(text: str, voice: Optional[str] = None) -> dict:
     if _engine_manager is None:
         await initialize_server()
     
+    # Reload config to pick up external changes
+    _config = Config.load()
+    
     try:
         # Get the engine
         engine = await _engine_manager.get_engine()
@@ -179,6 +182,9 @@ async def speak_text(
 
     if _engine_manager is None:
         await initialize_server()
+
+    # Reload config to pick up external changes
+    _config = Config.load()
 
     logger.info(f"[TOOL] speak_text called: '{text[:50]}...'")
     logger.debug(
@@ -499,6 +505,9 @@ async def get_status() -> dict:
             "status": "not_initialized",
             "message": "TTS engine not yet initialized",
         }
+
+    # Reload config to pick up external changes
+    _config = Config.load()
 
     logger.info("[TOOL] get_status")
 

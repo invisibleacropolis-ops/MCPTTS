@@ -125,6 +125,10 @@ class SystemTTSEngine(TTSEngine):
         import pyttsx3
         engine = pyttsx3.init()
         
+        # Force clear loop state if it was left open
+        if hasattr(engine, '_inLoop') and engine._inLoop:
+            engine.endLoop()
+        
         # Apply settings
         # Calculate effective rate with emotion adjustment
         emotion_rate_mult = EMOTION_RATE_ADJUSTMENTS.get(settings.emotion, 1.0)
@@ -164,7 +168,13 @@ class SystemTTSEngine(TTSEngine):
         
         try:
             engine.say(text)
-            engine.runAndWait()
+            try:
+                engine.runAndWait()
+            except RuntimeError as e:
+                if "run loop already started" in str(e):
+                    logger.warning("TTS run loop already active, command queued")
+                else:
+                    raise
             
             synthesis_time = time.perf_counter() - start_time
             # Estimate duration based on text length and rate

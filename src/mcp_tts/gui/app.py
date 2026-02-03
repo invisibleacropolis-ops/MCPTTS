@@ -437,7 +437,7 @@ class MCPTTSApp(ctk.CTk):
 
                     # In direct mode, audio was already played by pyttsx3
                     # In file mode, play through AudioPlayer
-                    if not use_direct_playback and len(result.audio_data) > 0:
+                    if len(result.audio_data) > 0:
                         result.audio_data = apply_audio_effects(
                             result.audio_data,
                             result.sample_rate,
