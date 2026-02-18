@@ -309,7 +309,13 @@ class EdgeTTSEngine(TTSEngine):
         except Exception as e:
             logger.debug(f"soundfile decode failed: {e}")
         
-        raise RuntimeError("No MP3 decoder available. Install miniaudio: pip install miniaudio")
+        logger.error(
+            "No MP3 decoder available - returning silence. "
+            "Install one of: miniaudio, pydub, soundfile"
+        )
+        # Return 1 second of silence so the call doesn't crash
+        sample_rate = 22050
+        return np.zeros(sample_rate, dtype=np.float32), sample_rate
 
     async def _play_audio(self, audio_data: np.ndarray, sample_rate: int) -> None:
         """Play audio directly using sounddevice."""

@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+dist/
+build/
 .venv/
 venv/
 env/
@@ -14,7 +17,6 @@ env/
 *.bat
 !Launch_MCP_TTS.bat
 !Start_MCP_Server.bat
-!start_fish_speech_server.bat
 uv.lock
 
 # IDEs

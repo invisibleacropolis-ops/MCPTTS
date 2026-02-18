@@ -3,8 +3,9 @@ from pathlib import Path
 from piper import PiperVoice
 
 def main():
-    model_path = Path(r"C:\Users\docwh\.mcp-tts\models\en_US-libritts_r-medium.onnx")
-    config_path = Path(r"C:\Users\docwh\.mcp-tts\models\en_US-libritts_r-medium.onnx.json")
+    models_dir = Path.home() / ".mcp-tts" / "models"
+    model_path = models_dir / "en_US-libritts_r-medium.onnx"
+    config_path = models_dir / "en_US-libritts_r-medium.onnx.json"
     
     print(f"Loading model from {model_path}")
     voice = PiperVoice.load(str(model_path), str(config_path))

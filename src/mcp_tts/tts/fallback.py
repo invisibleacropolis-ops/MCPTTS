@@ -6,6 +6,7 @@ Provides basic TTS functionality without advanced features.
 """
 
 import asyncio
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -17,6 +18,9 @@ from mcp_tts.utils.config import Emotion, TTSSettings
 from mcp_tts.utils.logging import get_logger
 
 logger = get_logger("tts.fallback")
+
+# Thread-local storage for pyttsx3 engine instances
+_thread_local = threading.local()
 
 
 # Emotion-based rate adjustments (since pyttsx3 doesn't support emotions natively)
@@ -96,10 +100,29 @@ class SystemTTSEngine(TTSEngine):
         if self._engine:
             self._engine.stop()
             self._engine = None
+        # Clean up thread-local engine if present
+        if hasattr(_thread_local, "engine") and _thread_local.engine is not None:
+            try:
+                _thread_local.engine.stop()
+            except Exception:
+                pass
+            _thread_local.engine = None
         self._voices.clear()
         self._initialized = False
         logger.debug("System TTS shutdown complete")
     
+    def _get_thread_engine(self):
+        """Get or create a pyttsx3 engine for the current thread."""
+        if not hasattr(_thread_local, "engine") or _thread_local.engine is None:
+            import pyttsx3
+            _thread_local.engine = pyttsx3.init()
+            logger.debug("Created new pyttsx3 engine for current thread")
+        engine = _thread_local.engine
+        # Force clear loop state if it was left open
+        if hasattr(engine, '_inLoop') and engine._inLoop:
+            engine.endLoop()
+        return engine
+
     async def synthesize(
         self,
         text: str,
@@ -120,14 +143,8 @@ class SystemTTSEngine(TTSEngine):
         
         logger.info(f"Synthesizing with System TTS: '{text[:50]}...'")
         
-        # pyttsx3 must be used from the thread where it's initialized
-        # Reinitialize for each call to ensure thread-safety
-        import pyttsx3
-        engine = pyttsx3.init()
-        
-        # Force clear loop state if it was left open
-        if hasattr(engine, '_inLoop') and engine._inLoop:
-            engine.endLoop()
+        # Use thread-local cached engine for thread-safety without reinit overhead
+        engine = self._get_thread_engine()
         
         # Apply settings
         # Calculate effective rate with emotion adjustment

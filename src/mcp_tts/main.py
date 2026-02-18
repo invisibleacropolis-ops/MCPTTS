@@ -9,12 +9,7 @@ Provides CLI interface for running the server in various modes:
 
 import argparse
 import logging
-import os
-import socket
-import subprocess
-import time
 import sys
-from typing import Optional
 from pathlib import Path
 
 from mcp_tts import __version__
@@ -85,19 +80,6 @@ Examples:
     )
 
     parser.add_argument(
-        "--fish-repo",
-        type=Path,
-        help="Path to Fish Speech repo for auto-launch",
-    )
-
-    parser.add_argument(
-        "--fish-port",
-        type=int,
-        default=8080,
-        help="Fish Speech API port (default: 8080)",
-    )
-
-    parser.add_argument(
         "--transport",
         "-t",
         choices=["stdio", "http"],
@@ -142,8 +124,6 @@ def main():
     if args.port:
         config.server.port = args.port
 
-    _maybe_start_fish_server(args.fish_repo, args.fish_port)
-
     try:
         if args.server or args.headless:
             # Run server directly
@@ -167,51 +147,6 @@ def main():
     except Exception as e:
         logger.exception(f"Fatal error: {e}")
         sys.exit(1)
-
-
-def _is_port_open(host: str, port: int) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=0.5):
-            return True
-    except OSError:
-        return False
-
-
-def _maybe_start_fish_server(repo_path: Optional[Path], port: int) -> None:
-    if _is_port_open("127.0.0.1", port):
-        return
-
-    env_repo = os.getenv("FISH_SPEECH_REPO")
-    repo = repo_path or (Path(env_repo) if env_repo else None)
-    if repo is None:
-        return
-
-    if not repo.exists():
-        logger = get_logger("main")
-        logger.warning(f"Fish Speech repo not found: {repo}")
-        return
-
-    logger = get_logger("main")
-    logger.info("Starting Fish Speech API server...")
-
-    cmd = [
-        sys.executable,
-        "-m",
-        "tools.api_server",
-        "--listen",
-        f"127.0.0.1:{port}",
-    ]
-
-    try:
-        subprocess.Popen(cmd, cwd=str(repo))
-        for _ in range(10):
-            if _is_port_open("127.0.0.1", port):
-                logger.info("Fish Speech API server is ready")
-                return
-            time.sleep(0.5)
-        logger.warning("Fish Speech API server did not respond in time")
-    except Exception as exc:
-        logger.warning(f"Failed to launch Fish Speech server: {exc}")
 
 
 if __name__ == "__main__":

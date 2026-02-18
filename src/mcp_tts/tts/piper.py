@@ -129,10 +129,6 @@ class PiperTTSEngine(TTSEngine):
             self._piper_available = False
             self._initialized = True
             # Don't raise, allow fallback
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize Piper TTS: {e}")
-            raise
 
     async def shutdown(self) -> None:
         """Clean up Piper resources."""

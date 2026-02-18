@@ -36,7 +36,7 @@ class TTSSettings(BaseModel):
     voice: str = Field(default="en_US-amy-medium", description="Voice model identifier")
     engine: str = Field(
         default=os.getenv("MCP_TTS_ENGINE", "auto"),
-        description="TTS engine identifier (auto, fish, xtts, piper, system)",
+        description="TTS engine identifier (auto, edge, piper, system)",
     )
     speed: float = Field(
         default=1.0,
