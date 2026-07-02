@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Optional
 
+from mcp_tts.tts.audio import AudioPlayer
 from mcp_tts.tts.engine import TTSEngineType, resolve_engine_type
 from mcp_tts.tts.manager import EngineManager
-from mcp_tts.tts.audio import AudioPlayer
 from mcp_tts.utils.config import Config
 from mcp_tts.utils.logging import get_logger
 
@@ -24,9 +23,9 @@ logger = get_logger("server.context")
 class ServerContext:
     """Singleton context that owns all server-wide state."""
 
-    _instance: Optional["ServerContext"] = None
+    _instance: ServerContext | None = None
 
-    def __new__(cls) -> "ServerContext":
+    def __new__(cls) -> ServerContext:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
@@ -36,7 +35,7 @@ class ServerContext:
     # Initialization
     # ------------------------------------------------------------------
 
-    async def ensure_initialized(self, config: Optional[Config] = None) -> None:
+    async def ensure_initialized(self, config: Config | None = None) -> None:
         """Initialize engine manager, audio player, and config (idempotent)."""
         if self._initialized:
             return

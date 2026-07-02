@@ -5,7 +5,7 @@ description: How to use the MCP TTS Server tools to synthesize, play, and manage
 
 # MCP TTS Server — Agent Skill Guide
 
-This skill teaches you how to fluently use the **MCP TTS Server** to convert text to speech, manage voices, control emotions, and handle audio output. The server exposes its capabilities as MCP tools and resources.
+This skill teaches you how to fluently use the **MCP TTS Server** to convert text to speech, manage voices, check emotion availability, and handle audio output. The server exposes its capabilities as MCP tools and resources.
 
 ---
 
@@ -95,7 +95,7 @@ list_voices()               # All voices for the current engine
 list_voices(engine="piper")  # Only Piper voices
 ```
 
-Returns a list of voice objects, each with: `id`, `name`, `language`, `gender`, `sample_rate`, `supports_emotions`, `supported_emotions`.
+Returns a list of voice objects, each with: `id`, `name`, `language`, `gender`, `sample_rate`, `emotion_support`, `emotion_support_reason`, `supports_emotions`, `supported_emotions`.
 
 #### `set_voice` — Change the default voice for all subsequent calls
 
@@ -124,11 +124,19 @@ clone_voice(
 
 ### Emotion Control
 
-#### `set_emotion` — Set the default emotion for all subsequent calls
+#### `set_emotion` — Set the default emotion for all subsequent calls when available
 
 ```
 set_emotion(emotion="excited", intensity=0.8)
 ```
+
+Emotion support is voice/engine dependent. Check `list_voices()` or `get_status()` first:
+
+| `emotion_support` | Meaning |
+|-------------------|---------|
+| `native` | The engine has real emotion/style controls |
+| `simulated` | The engine simulates emotion with rate/pitch/prosody |
+| `unavailable` | Non-neutral emotions are disabled/rejected |
 
 #### Emotions Reference
 
@@ -144,7 +152,7 @@ set_emotion(emotion="excited", intensity=0.8)
 | `surprised`  | Quick, higher-pitched, exclamatory            | Reactions, revelations            |
 
 > [!TIP]
-> Emotion effects are applied via speed/pitch modulation. Intensity controls how strongly the effect is applied — start with 0.5 and adjust.
+> Current engines report simulated or unavailable emotion support. Intensity controls how strongly simulated rate/pitch effects are applied — start with 0.5 and adjust.
 
 ---
 
@@ -198,7 +206,7 @@ These are queryable via `read_resource`:
 |------------------|-------------------------------------------|
 | `tts://voices`   | JSON array of all available voice models  |
 | `tts://settings` | Current TTS configuration as JSON         |
-| `tts://emotions` | Available emotions with descriptions      |
+| `tts://emotions` | Current voice emotion capability and emotion descriptions |
 
 ---
 
@@ -258,8 +266,8 @@ Every parameter in `speak_text` has a sensible default. Don't pass `engine`, `sp
 ### 3. Use streaming for long text
 For anything over ~500 characters, set `streaming=True`. The user hears audio sooner and the experience feels more responsive.
 
-### 4. Match emotion to context
-When reading the user's text aloud, pick an emotion that matches the content:
+### 4. Match emotion to context when available
+When reading the user's text aloud, first check that the selected voice reports `native` or `simulated` emotion support. Then pick an emotion that matches the content:
 - Error messages → `"calm"` or `"neutral"` (not `"angry"`)
 - Good results → `"happy"` at low intensity (0.3–0.5)
 - Stories/narrative → vary between `"calm"`, `"excited"`, `"surprised"` per passage

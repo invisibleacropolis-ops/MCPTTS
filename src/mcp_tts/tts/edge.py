@@ -13,11 +13,11 @@ import asyncio
 import io
 import time
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
-from mcp_tts.tts.engine import TTSEngine, TTSEngineType, TTSResult, TTSSettings, Emotion, VoiceInfo
+from mcp_tts.tts.engine import EmotionSupport, TTSEngine, TTSEngineType, TTSResult, VoiceInfo
+from mcp_tts.utils.config import Emotion, TTSSettings
 from mcp_tts.utils.logging import get_logger
 
 logger = get_logger("tts.edge")
@@ -30,23 +30,23 @@ DEFAULT_VOICES = {
     "default": "en-US-JennyNeural",
 }
 
-# Emotion to SSML style mappings
-EMOTION_STYLES = {
-    Emotion.NEUTRAL: None,
-    Emotion.HAPPY: "cheerful",
-    Emotion.SAD: "sad",
-    Emotion.ANGRY: "angry",
-    Emotion.EXCITED: "excited",
-    Emotion.CALM: "calm",
-    Emotion.FEARFUL: "terrified",
-    Emotion.SURPRISED: "surprised",
+# Edge's public Python package supports rate and pitch, not native style labels.
+EMOTION_PROSODY = {
+    Emotion.NEUTRAL: {"rate": 1.0, "pitch_hz": 0},
+    Emotion.HAPPY: {"rate": 1.1, "pitch_hz": 25},
+    Emotion.SAD: {"rate": 0.9, "pitch_hz": -25},
+    Emotion.ANGRY: {"rate": 1.15, "pitch_hz": 15},
+    Emotion.EXCITED: {"rate": 1.2, "pitch_hz": 35},
+    Emotion.CALM: {"rate": 0.85, "pitch_hz": -10},
+    Emotion.FEARFUL: {"rate": 1.05, "pitch_hz": 10},
+    Emotion.SURPRISED: {"rate": 1.1, "pitch_hz": 40},
 }
 
 
 class EdgeTTSEngine(TTSEngine):
     """
     Edge TTS engine using Microsoft's neural TTS service.
-    
+
     Features:
     - High-quality neural voices
     - Multiple languages and voices
@@ -54,7 +54,7 @@ class EdgeTTSEngine(TTSEngine):
     - No API key required (uses Edge browser's TTS endpoint)
     """
 
-    def __init__(self, models_dir: Optional[Path] = None):
+    def __init__(self, models_dir: Path | None = None):
         super().__init__(models_dir)
         self._edge_available = False
         self._voices: list[dict] = []
@@ -75,16 +75,16 @@ class EdgeTTSEngine(TTSEngine):
     async def initialize(self) -> None:
         """Initialize Edge TTS engine."""
         logger.info("Initializing Edge TTS engine...")
-        
+
         try:
             import edge_tts
             self._edge_available = True
-            
+
             # Fetch available voices
             voices = await edge_tts.list_voices()
             self._voices = voices
             logger.info(f"Edge TTS initialized with {len(voices)} voices")
-            
+
         except ImportError:
             logger.error("edge-tts not installed - install with: pip install edge-tts")
             self._edge_available = False
@@ -99,46 +99,51 @@ class EdgeTTSEngine(TTSEngine):
     async def synthesize(
         self,
         text: str,
-        settings: Optional[TTSSettings] = None,
+        settings: TTSSettings | None = None,
         use_direct_playback: bool = False,
     ) -> TTSResult:
         """Synthesize speech using Edge TTS."""
-        import edge_tts
-        import tempfile
         import os
-        
+        import tempfile
+
+        import edge_tts
+
         start_time = time.perf_counter()
         settings = settings or TTSSettings()
-        
+
         logger.info(f"Synthesizing text ({len(text)} chars): '{text[:50]}...'")
         logger.debug(f"Settings: voice={settings.voice}, speed={settings.speed}")
-        
+
         if not self._edge_available:
             raise RuntimeError("Edge TTS not available")
-        
+
         # Map voice setting to Edge TTS voice
         voice = self._resolve_voice(settings.voice)
-        
-        # Calculate rate adjustment
-        rate = f"+{int((settings.speed - 1) * 100)}%" if settings.speed >= 1 else f"{int((settings.speed - 1) * 100)}%"
-        
+
+        rate, pitch = self._edge_prosody_arguments(
+            settings.speed,
+            settings.pitch,
+            settings.emotion,
+            settings.emotion_intensity,
+        )
+
         # Create communicate instance
-        communicate = edge_tts.Communicate(text, voice, rate=rate)
-        
+        communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+
         # Save to temp file (edge-tts outputs MP3)
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             temp_mp3_path = f.name
-        
+
         try:
             await communicate.save(temp_mp3_path)
-            
+
             # Read back file
             with open(temp_mp3_path, "rb") as f:
                 mp3_data = f.read()
-            
+
             # Decode MP3 to PCM
             audio_data, sample_rate = await self._decode_mp3(mp3_data)
-            
+
             # Direct playback if requested
             if use_direct_playback:
                 await self._play_audio(audio_data, sample_rate)
@@ -146,16 +151,16 @@ class EdgeTTSEngine(TTSEngine):
             # Clean up temp file
             if os.path.exists(temp_mp3_path):
                 os.unlink(temp_mp3_path)
-        
+
         duration = len(audio_data) / sample_rate if sample_rate > 0 else 0.0
         synthesis_time = time.perf_counter() - start_time
         rtf = synthesis_time / duration if duration > 0 else 0.0
-        
+
         logger.info(
             f"Synthesis complete: {duration:.2f}s audio in {synthesis_time:.3f}s "
             f"(RTF: {rtf:.2f}x)"
         )
-        
+
         return TTSResult(
             audio_data=audio_data,
             sample_rate=sample_rate,
@@ -166,20 +171,16 @@ class EdgeTTSEngine(TTSEngine):
         )
 
     async def _load_and_play_mp3(
-        self, 
-        mp3_path: str, 
-        play: bool, 
+        self,
+        mp3_path: str,
+        play: bool,
         volume: float
     ) -> tuple[np.ndarray, int]:
         """Load MP3 file and optionally play it."""
-        import wave
-        import subprocess
-        import tempfile
-        import os
-        
+
         # Convert MP3 to WAV using ffmpeg if available, otherwise try pygame
-        wav_path = mp3_path.replace(".mp3", ".wav")
-        
+        mp3_path.replace(".mp3", ".wav")
+
         # Try pygame for direct playback (it handles MP3 natively)
         if play:
             try:
@@ -197,7 +198,7 @@ class EdgeTTSEngine(TTSEngine):
                 logger.debug("pygame not available, trying playsound")
             except Exception as e:
                 logger.debug(f"pygame playback failed: {e}")
-        
+
         # Try playsound for simple playback
         if play:
             try:
@@ -208,7 +209,7 @@ class EdgeTTSEngine(TTSEngine):
                 logger.debug("playsound not available")
             except Exception as e:
                 logger.debug(f"playsound failed: {e}")
-        
+
         # For non-playback cases or if playback libraries fail, just return dummy data
         # The main use case is direct playback which works with pygame/playsound
         logger.warning("No MP3 playback library available - install pygame: pip install pygame")
@@ -217,7 +218,7 @@ class EdgeTTSEngine(TTSEngine):
     async def list_voices(self) -> list[VoiceInfo]:
         """List available Edge TTS voices."""
         logger.debug("Listing available voices")
-        
+
         if not self._voices:
             try:
                 import edge_tts
@@ -225,7 +226,7 @@ class EdgeTTSEngine(TTSEngine):
             except Exception as e:
                 logger.error(f"Failed to list voices: {e}")
                 return []
-        
+
         # Format for our voice list
         result = []
         for voice in self._voices:
@@ -236,14 +237,17 @@ class EdgeTTSEngine(TTSEngine):
                     language=voice.get("Locale", ""),
                     gender=voice.get("Gender", ""),
                     sample_rate=24000, # Edge TTS usually 24k
-                    supports_emotions=True,
-                    supported_emotions=list(EMOTION_STYLES.keys())
+                    emotion_support=EmotionSupport.SIMULATED,
+                    emotion_support_reason=(
+                        "Edge emotion is simulated with supported rate and pitch controls."
+                    ),
+                    supported_emotions=[e.value for e in Emotion],
                 ))
-        
+
         logger.info(f"Found {len(result)} English voices")
         return result
 
-    async def get_voice(self, voice_id: str) -> Optional[VoiceInfo]:
+    async def get_voice(self, voice_id: str) -> VoiceInfo | None:
         """Get info for a specific voice."""
         voices = await self.list_voices()
         for voice in voices:
@@ -256,7 +260,7 @@ class EdgeTTSEngine(TTSEngine):
         # If it looks like an Edge TTS voice name, use it directly
         if "-" in voice_setting and "Neural" in voice_setting:
             return voice_setting
-        
+
         # Try to map Piper-style voice to Edge voice
         if voice_setting.startswith("en_US"):
             return DEFAULT_VOICES["en-US"]
@@ -264,13 +268,33 @@ class EdgeTTSEngine(TTSEngine):
             return DEFAULT_VOICES["en-GB"]
         elif voice_setting.startswith("en_AU"):
             return DEFAULT_VOICES["en-AU"]
-        
+
         return DEFAULT_VOICES["default"]
+
+    def _edge_prosody_arguments(
+        self,
+        speed: float,
+        pitch: float,
+        emotion: Emotion,
+        intensity: float,
+    ) -> tuple[str, str]:
+        """Return edge-tts rate and pitch arguments with simulated emotion applied."""
+        prosody = EMOTION_PROSODY.get(emotion, EMOTION_PROSODY[Emotion.NEUTRAL])
+        rate_adjustment = (prosody["rate"] - 1.0) * intensity
+        final_speed = max(0.5, min(2.0, speed * (1.0 + rate_adjustment)))
+
+        base_pitch_hz = int(max(-1.0, min(1.0, pitch)) * 50)
+        final_pitch_hz = base_pitch_hz + int(prosody["pitch_hz"] * intensity)
+        final_pitch_hz = max(-100, min(100, final_pitch_hz))
+
+        rate_percent = int((final_speed - 1.0) * 100)
+        rate_prefix = "+" if rate_percent >= 0 else ""
+        pitch_prefix = "+" if final_pitch_hz >= 0 else ""
+        return f"{rate_prefix}{rate_percent}%", f"{pitch_prefix}{final_pitch_hz}Hz"
 
     async def _decode_mp3(self, mp3_data: bytes) -> tuple[np.ndarray, int]:
         """Decode MP3 data to numpy array."""
-        import io
-        
+
         # Try miniaudio first (pure Python, no external deps)
         try:
             import miniaudio
@@ -282,7 +306,7 @@ class EdgeTTSEngine(TTSEngine):
             logger.debug("miniaudio not available, trying pydub")
         except Exception as e:
             logger.debug(f"miniaudio decode failed: {e}, trying pydub")
-        
+
         # Try pydub (requires ffmpeg)
         try:
             from pydub import AudioSegment
@@ -296,7 +320,7 @@ class EdgeTTSEngine(TTSEngine):
             logger.debug("pydub not available")
         except Exception as e:
             logger.debug(f"pydub decode failed: {e}")
-        
+
         # Try soundfile
         try:
             import soundfile as sf
@@ -308,7 +332,7 @@ class EdgeTTSEngine(TTSEngine):
             logger.debug("soundfile not available")
         except Exception as e:
             logger.debug(f"soundfile decode failed: {e}")
-        
+
         logger.error(
             "No MP3 decoder available - returning silence. "
             "Install one of: miniaudio, pydub, soundfile"

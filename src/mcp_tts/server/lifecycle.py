@@ -4,7 +4,7 @@ Server lifecycle — entry point for the ``mcp-tts-server`` console script.
 
 import logging
 
-from mcp_tts.utils.logging import setup_logging, get_logger
+from mcp_tts.utils.logging import get_logger, setup_logging
 
 logger = get_logger("server.lifecycle")
 

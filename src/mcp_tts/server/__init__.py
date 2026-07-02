@@ -11,8 +11,8 @@ from mcp.server import FastMCP
 mcp = FastMCP(name="MCP TTS Server")
 
 # Import tool and resource registrations so @mcp.tool() decorators execute
-from mcp_tts.server import tools as _tools  # noqa: F401, E402
 from mcp_tts.server import resources as _resources  # noqa: F401, E402
+from mcp_tts.server import tools as _tools  # noqa: F401, E402
 
 
 def run_server() -> None:

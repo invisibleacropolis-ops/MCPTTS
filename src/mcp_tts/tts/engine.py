@@ -7,19 +7,35 @@ Provides:
 - Factory function for creating engine instances
 """
 
-import io
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Optional
 
 import numpy as np
 
-from mcp_tts.utils.logging import get_logger
 from mcp_tts.utils.config import Emotion, TTSSettings
+from mcp_tts.utils.logging import get_logger
 
 logger = get_logger("tts.engine")
+
+
+class EmotionSupport(StrEnum):
+    """How an engine/voice can honor emotion settings."""
+
+    NATIVE = "native"
+    SIMULATED = "simulated"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass
+class EmotionValidation:
+    """Result of checking whether an emotion request is usable."""
+
+    allowed: bool
+    message: str
+    emotion_support: EmotionSupport
+    supported_emotions: list[str]
 
 
 @dataclass
@@ -29,11 +45,39 @@ class VoiceInfo:
     id: str
     name: str
     language: str
-    gender: Optional[str] = None
-    description: Optional[str] = None
+    gender: str | None = None
+    description: str | None = None
     sample_rate: int = 22050
-    supports_emotions: bool = False
+    supports_emotions: bool | None = None
+    emotion_support: EmotionSupport | str = EmotionSupport.UNAVAILABLE
+    emotion_support_reason: str = "This voice does not expose emotion controls."
     supported_emotions: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Normalize legacy and explicit emotion capability fields."""
+        if isinstance(self.emotion_support, str):
+            self.emotion_support = EmotionSupport(self.emotion_support)
+
+        has_legacy_support = (
+            self.supports_emotions is not None
+            and self.emotion_support == EmotionSupport.UNAVAILABLE
+        )
+        if has_legacy_support:
+            if self.supports_emotions:
+                self.emotion_support = EmotionSupport.SIMULATED
+                if (
+                    self.emotion_support_reason
+                    == "This voice does not expose emotion controls."
+                ):
+                    self.emotion_support_reason = "Uses simulated emotion via prosody controls."
+
+        if self.emotion_support == EmotionSupport.UNAVAILABLE:
+            self.supported_emotions = []
+
+    @property
+    def emotions_available(self) -> bool:
+        """Return True when non-neutral emotion choices are meaningful."""
+        return self.emotion_support in (EmotionSupport.NATIVE, EmotionSupport.SIMULATED)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for MCP responses."""
@@ -44,9 +88,56 @@ class VoiceInfo:
             "gender": self.gender,
             "description": self.description,
             "sample_rate": self.sample_rate,
-            "supports_emotions": self.supports_emotions,
+            "supports_emotions": self.emotions_available,
+            "emotion_support": self.emotion_support.value,
+            "emotion_support_reason": self.emotion_support_reason,
             "supported_emotions": self.supported_emotions,
         }
+
+
+def validate_emotion_available(voice: VoiceInfo, emotion: Emotion) -> EmotionValidation:
+    """Validate an emotion request against voice capability metadata."""
+    supported_emotions = voice.supported_emotions.copy()
+
+    if emotion == Emotion.NEUTRAL:
+        return EmotionValidation(
+            allowed=True,
+            message="Neutral emotion is always available.",
+            emotion_support=voice.emotion_support,
+            supported_emotions=supported_emotions,
+        )
+
+    if not voice.emotions_available:
+        return EmotionValidation(
+            allowed=False,
+            message=(
+                f"Emotion '{emotion.value}' is unavailable for voice '{voice.id}'. "
+                f"{voice.emotion_support_reason}"
+            ),
+            emotion_support=voice.emotion_support,
+            supported_emotions=supported_emotions,
+        )
+
+    if supported_emotions and emotion.value not in supported_emotions:
+        return EmotionValidation(
+            allowed=False,
+            message=(
+                f"Emotion '{emotion.value}' is not supported for voice '{voice.id}'. "
+                f"Available: {', '.join(supported_emotions)}"
+            ),
+            emotion_support=voice.emotion_support,
+            supported_emotions=supported_emotions,
+        )
+
+    return EmotionValidation(
+        allowed=True,
+        message=(
+            f"Emotion '{emotion.value}' is {voice.emotion_support.value} "
+            f"for voice '{voice.id}'."
+        ),
+        emotion_support=voice.emotion_support,
+        supported_emotions=supported_emotions,
+    )
 
 
 @dataclass
@@ -61,7 +152,7 @@ class TTSResult:
     settings_used: TTSSettings
 
     # Optional file path if saved
-    saved_path: Optional[Path] = None
+    saved_path: Path | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for MCP responses (excluding audio data)."""
@@ -80,7 +171,7 @@ class TTSResult:
         }
 
 
-class TTSEngineType(str, Enum):
+class TTSEngineType(StrEnum):
     """Available TTS engine types."""
 
     EDGE = "edge"      # Primary - Microsoft Edge neural TTS (cloud)
@@ -96,7 +187,7 @@ class TTSEngine(ABC):
     and implement the abstract methods.
     """
 
-    def __init__(self, models_dir: Optional[Path] = None):
+    def __init__(self, models_dir: Path | None = None):
         """
         Initialize the TTS engine.
 
@@ -139,7 +230,7 @@ class TTSEngine(ABC):
     async def synthesize(
         self,
         text: str,
-        settings: Optional[TTSSettings] = None,
+        settings: TTSSettings | None = None,
         use_direct_playback: bool = False,
     ) -> TTSResult:
         """
@@ -165,7 +256,7 @@ class TTSEngine(ABC):
         pass
 
     @abstractmethod
-    async def get_voice(self, voice_id: str) -> Optional[VoiceInfo]:
+    async def get_voice(self, voice_id: str) -> VoiceInfo | None:
         """
         Get info for a specific voice.
 
@@ -217,7 +308,7 @@ class TTSEngine(ABC):
 
 def create_engine(
     engine_type: TTSEngineType = TTSEngineType.PIPER,
-    models_dir: Optional[Path] = None,
+    models_dir: Path | None = None,
 ) -> TTSEngine:
     """
     Factory function to create a TTS engine instance.
@@ -250,7 +341,7 @@ def create_engine(
         raise ValueError(f"Unsupported engine type: {engine_type}")
 
 
-def resolve_engine_type(value: Optional[str], default: TTSEngineType) -> TTSEngineType:
+def resolve_engine_type(value: str | None, default: TTSEngineType) -> TTSEngineType:
     """Resolve engine type from string input."""
     if not value:
         return default
