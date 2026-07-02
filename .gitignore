@@ -16,6 +16,7 @@ env/
 *.txt
 *.bat
 !Launch_MCP_TTS.bat
+!Launch_MCP_TTS_CUDA.bat
 !Start_MCP_Server.bat
 uv.lock
 

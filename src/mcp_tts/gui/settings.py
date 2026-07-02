@@ -7,13 +7,13 @@ Uses extracted sub-widgets from widgets.py for a cleaner layout:
 - EmotionPicker: Emotion radios + intensity slider
 """
 
-from typing import Callable, Optional
+from collections.abc import Callable
 from tkinter import filedialog
 
 import customtkinter as ctk
 
-from mcp_tts.gui.widgets import VoiceSelector, ProsodyControls, EmotionPicker
-from mcp_tts.utils.config import Config, Emotion, TTSSettings, VOICE_PRESETS
+from mcp_tts.gui.widgets import EmotionPicker, ProsodyControls, VoiceSelector
+from mcp_tts.utils.config import VOICE_PRESETS, Config, Emotion, TTSSettings
 from mcp_tts.utils.logging import get_logger
 
 logger = get_logger("gui.settings")
@@ -30,10 +30,10 @@ class SettingsPanel(ctk.CTkFrame):
     def __init__(
         self,
         parent,
-        config: Optional[Config] = None,
-        on_settings_change: Optional[Callable[[TTSSettings], None]] = None,
-        on_preview: Optional[Callable[[str], None]] = None,
-        on_clone_voice: Optional[Callable[[str, str, str, str], None]] = None,
+        config: Config | None = None,
+        on_settings_change: Callable[[TTSSettings], None] | None = None,
+        on_preview: Callable[[str], None] | None = None,
+        on_clone_voice: Callable[[str, str, str, str], None] | None = None,
         **kwargs,
     ):
         super().__init__(parent, **kwargs)
@@ -42,6 +42,7 @@ class SettingsPanel(ctk.CTkFrame):
         self.on_settings_change = on_settings_change
         self.on_preview = on_preview
         self.on_clone_voice = on_clone_voice
+        self._voice_capabilities: dict[str, dict] = {}
 
         self._setup_ui()
         self._load_settings()
@@ -224,6 +225,7 @@ class SettingsPanel(ctk.CTkFrame):
         self.emotion_picker.emotion_var.set(s.emotion.value)
         self.emotion_picker.intensity_var.set(s.emotion_intensity)
         self.emotion_picker.update_labels()
+        self._apply_voice_capability(s.voice)
 
         self.direct_playback_var.set(self.config.audio.use_direct_playback)
         if self.config.audio.use_direct_playback:
@@ -256,6 +258,7 @@ class SettingsPanel(ctk.CTkFrame):
 
     def _on_voice_change(self, value: str):
         logger.debug(f"Voice changed to: {value}")
+        self._apply_voice_capability(value)
         self._notify_change()
 
     def _on_engine_change(self, value: str):
@@ -337,7 +340,29 @@ class SettingsPanel(ctk.CTkFrame):
     def update_voices(self, voices: list[str]):
         """Update the available voices list."""
         self.voice_selector.update_voices(voices)
+        self._apply_voice_capability(self.voice_selector.voice_var.get())
         logger.debug(f"Updated voices list: {len(voices)} voices")
+
+    def update_voice_infos(self, voices: list) -> None:
+        """Update voice choices and emotion capability metadata."""
+        self._voice_capabilities = {voice.id: voice.to_dict() for voice in voices}
+        self.update_voices([voice.id for voice in voices])
+
+    def _apply_voice_capability(self, voice_id: str) -> None:
+        capability = self._voice_capabilities.get(voice_id)
+        if capability is None:
+            self.emotion_picker.set_capability(
+                "unavailable",
+                [],
+                "Voice capability has not been loaded yet.",
+            )
+            return
+
+        self.emotion_picker.set_capability(
+            capability.get("emotion_support", "unavailable"),
+            capability.get("supported_emotions", []),
+            capability.get("emotion_support_reason", ""),
+        )
 
     def set_engine_hint(self, engine_name: str):
         """Set the engine hint label."""

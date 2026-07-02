@@ -8,14 +8,14 @@ Provides:
 - Log level filtering
 """
 
+from __future__ import annotations
+
 import logging
 import sys
 from datetime import datetime
 from logging.handlers import QueueHandler, RotatingFileHandler
 from multiprocessing import Queue
 from pathlib import Path
-from typing import Optional
-
 
 # Custom log format with verbose debugging info
 VERBOSE_FORMAT = (
@@ -51,7 +51,7 @@ class GUILogHandler(QueueHandler):
     """
     Custom QueueHandler that sends log records to a multiprocessing Queue
     for consumption by the GUI log viewer.
-    
+
     Each log record is serialized as a dict for safe cross-process transfer.
     """
 
@@ -75,7 +75,7 @@ class GUILogHandler(QueueHandler):
 class LoggerManager:
     """
     Centralized logger management for the MCP TTS application.
-    
+
     Supports:
     - Console output with colors
     - File logging with rotation
@@ -83,10 +83,10 @@ class LoggerManager:
     - Dynamic log level changes
     """
 
-    _instance: Optional["LoggerManager"] = None
+    _instance: LoggerManager | None = None
     _initialized: bool = False
 
-    def __new__(cls) -> "LoggerManager":
+    def __new__(cls) -> LoggerManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -94,25 +94,25 @@ class LoggerManager:
     def __init__(self):
         if LoggerManager._initialized:
             return
-        
+
         self.root_logger = logging.getLogger("mcp_tts")
-        self.gui_queue: Optional[Queue] = None
-        self.gui_handler: Optional[GUILogHandler] = None
-        self.console_handler: Optional[logging.StreamHandler] = None
-        self.file_handler: Optional[RotatingFileHandler] = None
-        
+        self.gui_queue: Queue | None = None
+        self.gui_handler: GUILogHandler | None = None
+        self.console_handler: logging.StreamHandler | None = None
+        self.file_handler: RotatingFileHandler | None = None
+
         LoggerManager._initialized = True
 
     def setup(
         self,
         level: int = logging.DEBUG,
-        log_file: Optional[Path] = None,
-        gui_queue: Optional[Queue] = None,
+        log_file: Path | None = None,
+        gui_queue: Queue | None = None,
         verbose: bool = True,
     ) -> None:
         """
         Configure the logging system.
-        
+
         Args:
             level: Minimum log level to capture
             log_file: Optional path to log file
@@ -120,18 +120,18 @@ class LoggerManager:
             verbose: If True, use detailed format; otherwise simple format
         """
         self.root_logger.setLevel(level)
-        
+
         # Clear existing handlers
         self.root_logger.handlers.clear()
-        
+
         log_format = VERBOSE_FORMAT if verbose else SIMPLE_FORMAT
-        
+
         # Console handler with colors (use stderr to avoid MCP stdio conflicts)
         self.console_handler = logging.StreamHandler(sys.stderr)
         self.console_handler.setLevel(level)
         self.console_handler.setFormatter(ColoredFormatter(log_format, DATE_FORMAT))
         self.root_logger.addHandler(self.console_handler)
-        
+
         # File handler with rotation (if path provided)
         if log_file:
             log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -144,7 +144,7 @@ class LoggerManager:
             self.file_handler.setLevel(level)
             self.file_handler.setFormatter(logging.Formatter(log_format, DATE_FORMAT))
             self.root_logger.addHandler(self.file_handler)
-        
+
         # GUI queue handler (if queue provided)
         if gui_queue:
             self.gui_queue = gui_queue
@@ -152,7 +152,7 @@ class LoggerManager:
             self.gui_handler.setLevel(level)
             self.gui_handler.setFormatter(logging.Formatter(log_format, DATE_FORMAT))
             self.root_logger.addHandler(self.gui_handler)
-        
+
         self.root_logger.debug(
             f"Logging initialized: level={logging.getLevelName(level)}, "
             f"verbose={verbose}, file={log_file}, gui_queue={gui_queue is not None}"
@@ -173,24 +173,24 @@ class LoggerManager:
 
 
 # Module-level convenience functions
-_manager: Optional[LoggerManager] = None
+_manager: LoggerManager | None = None
 
 
 def setup_logging(
     level: int = logging.DEBUG,
-    log_file: Optional[Path] = None,
-    gui_queue: Optional[Queue] = None,
+    log_file: Path | None = None,
+    gui_queue: Queue | None = None,
     verbose: bool = True,
 ) -> LoggerManager:
     """
     Initialize the logging system.
-    
+
     Args:
         level: Minimum log level (default: DEBUG for verbose output)
         log_file: Optional path to write logs to file
         gui_queue: Optional Queue for GUI log streaming
         verbose: Use detailed format with source location info
-    
+
     Returns:
         LoggerManager instance
     """
@@ -203,10 +203,10 @@ def setup_logging(
 def get_logger(name: str) -> logging.Logger:
     """
     Get a logger for the given module/component name.
-    
+
     Args:
         name: Logger name (will be prefixed with 'mcp_tts.' if not already)
-    
+
     Returns:
         Configured Logger instance
     """

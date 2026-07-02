@@ -7,17 +7,15 @@ Provides:
 - Audio format conversion
 """
 
-import io
 import wave
-from pathlib import Path
-from typing import Optional
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 
-from mcp_tts.utils.logging import get_logger
 from mcp_tts.utils.config import AudioSettings
 from mcp_tts.utils.gpu import get_gpu_manager
+from mcp_tts.utils.logging import get_logger
 
 logger = get_logger("tts.audio")
 
@@ -32,7 +30,7 @@ class AudioPlayer:
     - Volume control
     """
 
-    def __init__(self, device: Optional[str] = None):
+    def __init__(self, device: str | None = None):
         """
         Initialize audio player.
 
@@ -121,7 +119,7 @@ class AudioPlayer:
 def apply_audio_effects(
     audio_data: np.ndarray,
     sample_rate: int,
-    settings: Optional[AudioSettings],
+    settings: AudioSettings | None,
 ) -> np.ndarray:
     """Apply optional audio effects (normalization, compression, reverb)."""
     if audio_data.size == 0:
@@ -168,7 +166,7 @@ def _apply_reverb(
 
     try:
         import torch
-        import torch.nn.functional as F
+        import torch.nn.functional as functional
 
         tensor = torch.from_numpy(audio_data).float().unsqueeze(0).unsqueeze(0)
         kernel = torch.from_numpy(impulse).float().unsqueeze(0).unsqueeze(0)
@@ -178,8 +176,8 @@ def _apply_reverb(
             tensor = tensor.to(device)
             kernel = kernel.to(device)
 
-        padded = F.pad(tensor, (decay_length - 1, 0))
-        convolved = F.conv1d(padded, kernel)
+        padded = functional.pad(tensor, (decay_length - 1, 0))
+        convolved = functional.conv1d(padded, kernel)
         reverb = convolved.squeeze().cpu().numpy()
 
         if reverb.shape[0] > audio_data.shape[0]:

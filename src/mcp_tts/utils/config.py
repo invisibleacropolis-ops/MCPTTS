@@ -10,14 +10,13 @@ Provides:
 
 import json
 import os
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
 
-class Emotion(str, Enum):
+class Emotion(StrEnum):
     """Available emotional expressions for TTS output."""
 
     NEUTRAL = "neutral"
@@ -70,14 +69,17 @@ class ServerSettings(BaseModel):
 class AudioSettings(BaseModel):
     """Audio output configuration."""
 
-    output_device: Optional[str] = Field(
+    output_device: str | None = Field(
         default=None, description="Audio output device name (None = system default)"
     )
     sample_rate: int = Field(default=22050, description="Audio sample rate in Hz")
     auto_play: bool = Field(default=True, description="Automatically play audio after synthesis")
     use_direct_playback: bool = Field(
         default=True,
-        description="Use real-time direct playback (no file creation). When False, creates WAV file first.",
+        description=(
+            "Use real-time direct playback (no file creation). "
+            "When False, creates WAV file first."
+        ),
     )
     save_to_file: bool = Field(
         default=False,
@@ -144,7 +146,7 @@ class Config(BaseModel):
     models_directory: Path = Field(default=Path.home() / ".mcp-tts" / "models")
 
     # Config file location
-    _config_path: Optional[Path] = None
+    _config_path: Path | None = None
 
     @classmethod
     def get_default_config_path(cls) -> Path:
@@ -152,7 +154,7 @@ class Config(BaseModel):
         return Path.home() / ".mcp-tts" / "config.json"
 
     @classmethod
-    def load(cls, path: Optional[Path] = None) -> "Config":
+    def load(cls, path: Path | None = None) -> "Config":
         """
         Load configuration from file.
 
@@ -166,7 +168,7 @@ class Config(BaseModel):
 
         if config_path.exists():
             try:
-                with open(config_path, "r", encoding="utf-8") as f:
+                with open(config_path, encoding="utf-8") as f:
                     data = json.load(f)
                 config = cls.model_validate(data)
                 config._config_path = config_path
@@ -180,7 +182,7 @@ class Config(BaseModel):
         config._config_path = config_path
         return config
 
-    def save(self, path: Optional[Path] = None) -> None:
+    def save(self, path: Path | None = None) -> None:
         """
         Save configuration to file.
 

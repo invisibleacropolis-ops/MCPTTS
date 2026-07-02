@@ -9,20 +9,17 @@ Piper is a fast, local neural text-to-speech system that:
 """
 
 import asyncio
-import io
-import logging
-import wave
-import os
 import json
+import os
 import time
-from pathlib import Path
-from typing import Any, Optional
 from inspect import signature
+from pathlib import Path
+from typing import Any
 from urllib import request
 
 import numpy as np
 
-from mcp_tts.tts.engine import TTSEngine, TTSEngineType, TTSResult, VoiceInfo
+from mcp_tts.tts.engine import EmotionSupport, TTSEngine, TTSEngineType, TTSResult, VoiceInfo
 from mcp_tts.utils.config import Emotion, TTSSettings
 from mcp_tts.utils.gpu import GPUStatus, get_gpu_manager
 from mcp_tts.utils.logging import get_logger
@@ -58,7 +55,7 @@ class PiperTTSEngine(TTSEngine):
     Simulates emotional expression through prosody adjustments.
     """
 
-    def __init__(self, models_dir: Optional[Path] = None):
+    def __init__(self, models_dir: Path | None = None):
         super().__init__(models_dir)
         self._piper = None
         self._voice_cache: dict[str, VoiceInfo] = {}
@@ -93,7 +90,7 @@ class PiperTTSEngine(TTSEngine):
         try:
             # Check for piper binary availability
             logger.debug("Checking for piper.exe installation...")
-            
+
             piper_exe = Path(os.path.expanduser("~/.mcp-tts/piper/piper.exe"))
             if piper_exe.exists():
                 logger.info(f"Found Piper binary at {piper_exe}")
@@ -118,11 +115,13 @@ class PiperTTSEngine(TTSEngine):
                 )
 
             await self._download_default_voices()
-            
+
             if self._piper_available:
                 logger.info("Piper TTS engine initialized successfully (binary mode)")
             else:
-                logger.warning("Piper TTS initialized but binary not found - synthesis will fallback")
+                logger.warning(
+                    "Piper TTS initialized but binary not found - synthesis will fallback"
+                )
 
         except Exception as e:
             logger.error(f"Failed to initialize Piper TTS: {e}")
@@ -184,7 +183,7 @@ class PiperTTSEngine(TTSEngine):
     async def synthesize(
         self,
         text: str,
-        settings: Optional[TTSSettings] = None,
+        settings: TTSSettings | None = None,
         use_direct_playback: bool = False,
     ) -> TTSResult:
         """
@@ -261,10 +260,10 @@ class PiperTTSEngine(TTSEngine):
         # Path to piper binary (extracted in ~/.mcp-tts/piper/piper.exe)
         # Assuming it's in the same base dir as models for now, or finding it relative to home
         piper_exe = Path(os.path.expanduser("~/.mcp-tts/piper/piper.exe"))
-        
+
         if not piper_exe.exists():
              # Fallback check for system path or relative path
-             piper_exe = Path("piper.exe") 
+             piper_exe = Path("piper.exe")
 
         logger.debug(f"Attempting Piper binary synthesis with voice: {voice} using {piper_exe}")
 
@@ -283,11 +282,14 @@ class PiperTTSEngine(TTSEngine):
         # piper.exe --model <model> --config <config> --output_raw
         cmd = [
             str(piper_exe),
-            "--model", str(model_path),
-            "--config", str(config_path),
-            "--output_raw", # Output raw audio to stdout
-            "--length_scale", str(1.0 / speed), # Piper uses inverse speed
-            # Note: Pitch support might depend on specific binary args or model, usually via espeak args if supported
+            "--model",
+            str(model_path),
+            "--config",
+            str(config_path),
+            "--output_raw",
+            "--length_scale",
+            str(1.0 / speed),
+            # Pitch support depends on the binary/model; synthesis uses speed only here.
             # For now we focus on basic synthesis
         ]
 
@@ -302,9 +304,9 @@ class PiperTTSEngine(TTSEngine):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            
+
             stdout_data, stderr_data = await process.communicate(input=text.encode("utf-8"))
-            
+
             if process.returncode != 0:
                 error_msg = stderr_data.decode("utf-8", errors="replace")
                 logger.error(f"Piper binary failed with code {process.returncode}: {error_msg}")
@@ -312,7 +314,7 @@ class PiperTTSEngine(TTSEngine):
 
             # Piper --output_raw outputs raw PCM samples, usually 16-bit mono
             # We need to know the sample rate from the voice config
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                  config = json.load(f)
                  # Config structure varies, usually top level or under 'audio'
                  sample_rate = config.get("audio", {}).get("sample_rate", 22050)
@@ -321,25 +323,25 @@ class PiperTTSEngine(TTSEngine):
             # Assuming 16-bit signed integer (S16LE)
             logger.debug(f"Piper stdout bytes: {len(stdout_data)}")
             audio_data = np.frombuffer(stdout_data, dtype=np.int16).astype(np.float32)
-            
+
             if len(audio_data) > 0:
                 max_amp = np.max(np.abs(audio_data))
                 logger.debug(f"Raw int16 max amplitude: {max_amp}")
-            
+
             audio_data /= 32768.0  # Normalize to [-1, 1]
-            
+
             if len(audio_data) > 0:
                 logger.debug(f"Normalized float32 max amplitude: {np.max(np.abs(audio_data))}")
-            
+
             logger.debug(f"Synthesized {len(audio_data)} samples at {sample_rate}Hz")
-            
+
             return audio_data, sample_rate
 
         except Exception as e:
             logger.error(f"Piper binary synthesis error: {e}")
             raise
 
-    def _load_voice(self, PiperVoice, model_path: Path, config_path: Path) -> Any:
+    def _load_voice(self, piper_voice_cls, model_path: Path, config_path: Path) -> Any:
         providers, device = self._get_onnx_providers()
         cache_key = (model_path.stem, tuple(providers))
 
@@ -349,7 +351,7 @@ class PiperTTSEngine(TTSEngine):
             return self._voice_runtime_cache[cache_key]
 
         load_kwargs = {}
-        load_signature = signature(PiperVoice.load)
+        load_signature = signature(piper_voice_cls.load)
         if "providers" in load_signature.parameters:
             load_kwargs["providers"] = providers
         if "use_cuda" in load_signature.parameters:
@@ -357,7 +359,7 @@ class PiperTTSEngine(TTSEngine):
         if "device" in load_signature.parameters:
             load_kwargs["device"] = device
 
-        voice_obj = PiperVoice.load(str(model_path), str(config_path), **load_kwargs)
+        voice_obj = piper_voice_cls.load(str(model_path), str(config_path), **load_kwargs)
         self._voice_runtime_cache[cache_key] = voice_obj
         self._active_device = device
         self._active_providers = tuple(providers)
@@ -398,18 +400,18 @@ class PiperTTSEngine(TTSEngine):
         if len(parts) < 3:
             logger.warning(f"Invalid voice ID format: {voice}")
             return
-            
+
         lang_code = parts[0]  # e.g., en_US
         name = parts[1]       # e.g., amy
         quality = parts[2]    # e.g., medium
-        
+
         # Approximate language family (e.g., en from en_US)
         lang_family = lang_code.split("_")[0]
-        
+
         # Construct URL
         # Pattern: family/code/name/quality/filename
         # e.g., en/en_US/amy/medium/en_US-amy-medium.onnx
-        
+
         rel_path = f"{lang_family}/{lang_code}/{name}/{quality}/{voice}"
         model_url = f"{PIPER_VOICE_BASE_URL}/{rel_path}.onnx"
         config_url = f"{PIPER_VOICE_BASE_URL}/{rel_path}.onnx.json"
@@ -488,7 +490,10 @@ class PiperTTSEngine(TTSEngine):
                             language=language,
                             description=f"Piper voice: {voice_id}",
                             sample_rate=22050,
-                            supports_emotions=True,  # Via prosody simulation
+                            emotion_support=EmotionSupport.SIMULATED,
+                            emotion_support_reason=(
+                                "Piper emotion is simulated with speed and pitch changes."
+                            ),
                             supported_emotions=[e.value for e in Emotion],
                         )
 
@@ -500,7 +505,8 @@ class PiperTTSEngine(TTSEngine):
                 language="en_US",
                 description="Default Piper voice (download required)",
                 sample_rate=22050,
-                supports_emotions=True,
+                emotion_support=EmotionSupport.SIMULATED,
+                emotion_support_reason="Piper emotion is simulated with speed and pitch changes.",
                 supported_emotions=[e.value for e in Emotion],
             )
 
@@ -508,7 +514,7 @@ class PiperTTSEngine(TTSEngine):
         logger.info(f"Found {len(voices)} voices")
         return voices
 
-    async def get_voice(self, voice_id: str) -> Optional[VoiceInfo]:
+    async def get_voice(self, voice_id: str) -> VoiceInfo | None:
         """Get info for a specific voice."""
         if voice_id in self._voice_cache:
             return self._voice_cache[voice_id]

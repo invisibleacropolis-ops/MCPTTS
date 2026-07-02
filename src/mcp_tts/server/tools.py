@@ -5,15 +5,15 @@ All @mcp.tool() registrations live here.
 """
 
 import asyncio
-import numpy as np
 from inspect import signature
 from pathlib import Path
-from typing import Optional
+
+import numpy as np
 
 from mcp_tts.server import mcp
 from mcp_tts.server.context import get_context
-from mcp_tts.tts.engine import TTSResult
-from mcp_tts.tts.audio import apply_audio_effects, save_audio, generate_output_filename
+from mcp_tts.tts.audio import apply_audio_effects, generate_output_filename, save_audio
+from mcp_tts.tts.engine import TTSResult, VoiceInfo, validate_emotion_available
 from mcp_tts.utils.config import Emotion, TTSSettings
 from mcp_tts.utils.gpu import detect_gpu, get_gpu_manager
 from mcp_tts.utils.logging import get_logger
@@ -46,6 +46,36 @@ def _split_text(text: str, max_chars: int) -> list[str]:
     return [part for part in parts if part]
 
 
+async def _resolve_voice_info(tts_engine, voice_id: str) -> VoiceInfo:
+    """Return capability metadata for a voice, falling back to unavailable metadata."""
+    voice_info = await tts_engine.get_voice(voice_id)
+    if voice_info is not None:
+        return voice_info
+
+    voices = await tts_engine.list_voices()
+    for voice in voices:
+        if voice.id == voice_id:
+            return voice
+    if voices:
+        return voices[0]
+
+    return VoiceInfo(
+        id=voice_id,
+        name=voice_id,
+        language="unknown",
+        emotion_support_reason="Voice capability is unknown because the voice was not found.",
+    )
+
+
+def _validation_payload(validation) -> dict:
+    """Return serializable emotion capability details."""
+    return {
+        "emotion_support": validation.emotion_support.value,
+        "supported_emotions": validation.supported_emotions,
+        "emotion_message": validation.message,
+    }
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
@@ -54,9 +84,9 @@ def _split_text(text: str, max_chars: int) -> list[str]:
 @mcp.tool()
 async def speak_text(
     text: str,
-    voice: Optional[str] = None,
-    engine: Optional[str] = None,
-    task: Optional[str] = None,
+    voice: str | None = None,
+    engine: str | None = None,
+    task: str | None = None,
     speed: float = 1.0,
     pitch: float = 0.0,
     emotion: str = "neutral",
@@ -76,11 +106,12 @@ async def speak_text(
         task: Routing hint (quality, fast)
         speed: Speech rate multiplier (0.5-2.0, default: 1.0)
         pitch: Pitch adjustment (-1.0 to 1.0, default: 0.0)
-        emotion: Emotional expression (neutral, happy, sad, angry, excited, calm, fearful, surprised)
+        emotion: Emotional expression
+            (neutral, happy, sad, angry, excited, calm, fearful, surprised)
         emotion_intensity: Intensity of emotion (0.0-1.0, default: 0.5)
         auto_play: Automatically play the audio (default: True)
         save_to_file: Save audio to a file (default: False)
-        streaming: If True, split text into chunks and synthesize/play incrementally (default: False)
+        streaming: If True, split text into chunks and synthesize/play incrementally
         chunk_size: Maximum characters per chunk when streaming (default: 220, minimum: 80)
 
     Returns:
@@ -112,12 +143,23 @@ async def speak_text(
         emotion_intensity=max(0.0, min(1.0, emotion_intensity)),
     )
 
+    voice_info = await _resolve_voice_info(tts_engine, settings.voice)
+    emotion_validation = validate_emotion_available(voice_info, emotion_enum)
+    if not emotion_validation.allowed:
+        return {
+            "status": "error",
+            "message": emotion_validation.message,
+            "voice": settings.voice,
+            "emotion": emotion_enum.value,
+            **_validation_payload(emotion_validation),
+        }
+
     # Synthesize
     played_in_streaming = False
     if streaming:
         chunks = _split_text(text, max(80, chunk_size))
         combined_audio: list[np.ndarray] = []
-        sample_rate: Optional[int] = None
+        sample_rate: int | None = None
 
         for idx, chunk in enumerate(chunks, start=1):
             logger.debug(f"Synthesizing chunk {idx}/{len(chunks)}")
@@ -161,6 +203,7 @@ async def speak_text(
 
     response = result.to_dict()
     response["status"] = "success"
+    response.update(_validation_payload(emotion_validation))
 
     # Play audio
     if auto_play and ctx.audio_player and not played_in_streaming:
@@ -187,7 +230,7 @@ async def speak_text(
 @mcp.tool()
 async def set_voice(
     voice: str,
-    engine: Optional[str] = None,
+    engine: str | None = None,
 ) -> dict:
     """
     Set the default voice for subsequent TTS calls.
@@ -229,7 +272,7 @@ async def set_voice(
 async def set_emotion(
     emotion: str,
     intensity: float = 0.5,
-    engine: Optional[str] = None,
+    engine: str | None = None,
 ) -> dict:
     """
     Set the emotional expression for TTS output.
@@ -258,6 +301,18 @@ async def set_emotion(
 
     engine_key = engine or ctx.config.tts.engine
     tts_engine = await ctx.engine_manager.get_engine(engine_key, task="tts")
+    current_voice = tts_engine.get_current_settings().voice
+    voice_info = await _resolve_voice_info(tts_engine, current_voice)
+    emotion_validation = validate_emotion_available(voice_info, emotion_enum)
+    if not emotion_validation.allowed:
+        return {
+            "status": "error",
+            "message": emotion_validation.message,
+            "voice": current_voice,
+            "emotion": emotion_enum.value,
+            **_validation_payload(emotion_validation),
+        }
+
     tts_engine.set_emotion(emotion_enum, max(0.0, min(1.0, intensity)))
 
     logger.info(f"Emotion set: {emotion_enum.value} @ {intensity}")
@@ -265,12 +320,13 @@ async def set_emotion(
         "status": "success",
         "emotion": emotion_enum.value,
         "intensity": intensity,
+        **_validation_payload(emotion_validation),
     }
 
 
 @mcp.tool()
 async def list_voices(
-    engine: Optional[str] = None,
+    engine: str | None = None,
 ) -> list[dict]:
     """
     List all available voice models with their capabilities.
@@ -295,8 +351,8 @@ async def clone_voice(
     audio_path: str,
     name: str,
     prompt_text: str = "Sample",
-    language: Optional[str] = None,
-    engine: Optional[str] = None,
+    language: str | None = None,
+    engine: str | None = None,
 ) -> dict:
     """
     Add a voice reference for cloning.
@@ -365,6 +421,8 @@ async def get_status() -> dict:
         ctx.config.tts.engine, task="tts"
     )
     settings = tts_engine.get_current_settings()
+    voice_info = await _resolve_voice_info(tts_engine, settings.voice)
+    emotion_validation = validate_emotion_available(voice_info, settings.emotion)
     gpu_info = detect_gpu()
 
     return {
@@ -384,6 +442,10 @@ async def get_status() -> dict:
             "emotion": settings.emotion.value,
             "emotion_intensity": settings.emotion_intensity,
             "volume": settings.volume,
+        },
+        "emotion_capability": {
+            "voice": voice_info.to_dict(),
+            **_validation_payload(emotion_validation),
         },
         "audio": {
             "auto_play": ctx.config.audio.auto_play,
@@ -412,11 +474,11 @@ async def get_gpu_status() -> dict:
 
 @mcp.tool()
 async def configure_tts(
-    engine: Optional[str] = None,
-    speed: Optional[float] = None,
-    pitch: Optional[float] = None,
-    volume: Optional[float] = None,
-    auto_play: Optional[bool] = None,
+    engine: str | None = None,
+    speed: float | None = None,
+    pitch: float | None = None,
+    volume: float | None = None,
+    auto_play: bool | None = None,
 ) -> dict:
     """
     Configure TTS settings (all parameters optional).

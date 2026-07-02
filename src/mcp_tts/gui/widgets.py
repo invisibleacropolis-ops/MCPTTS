@@ -9,7 +9,8 @@ Reusable GUI widgets for MCP TTS.
 - EmotionPicker: Emotion radios + intensity slider
 """
 
-from typing import Optional, Callable
+from collections.abc import Callable
+
 import customtkinter as ctk
 
 from mcp_tts.utils.logging import get_logger
@@ -44,7 +45,7 @@ class ToastBar(ctk.CTkFrame):
         super().__init__(parent, height=0, **kwargs)
         self._parent = parent
         self._dismiss_ms = dismiss_ms
-        self._dismiss_job: Optional[str] = None
+        self._dismiss_job: str | None = None
         self._visible = False
 
         self.grid_columnconfigure(1, weight=1)
@@ -145,7 +146,7 @@ class StatusIndicator(ctk.CTkFrame):
 
         self._state = "idle"
         self._anim_frame = 0
-        self._anim_job: Optional[str] = None
+        self._anim_job: str | None = None
 
         self._dot = ctk.CTkLabel(
             self, text="●", font=ctk.CTkFont(size=12),
@@ -269,8 +270,8 @@ class VoiceSelector(ctk.CTkFrame):
     def __init__(
         self,
         parent,
-        on_voice_change: Optional[Callable[[str], None]] = None,
-        on_engine_change: Optional[Callable[[str], None]] = None,
+        on_voice_change: Callable[[str], None] | None = None,
+        on_engine_change: Callable[[str], None] | None = None,
         **kwargs,
     ):
         kwargs.setdefault("fg_color", "transparent")
@@ -346,7 +347,7 @@ class ProsodyControls(ctk.CTkFrame):
     def __init__(
         self,
         parent,
-        on_change: Optional[Callable[[], None]] = None,
+        on_change: Callable[[], None] | None = None,
         **kwargs,
     ):
         kwargs.setdefault("fg_color", "transparent")
@@ -417,13 +418,14 @@ class EmotionPicker(ctk.CTkFrame):
         self,
         parent,
         emotions: list[str],
-        on_change: Optional[Callable[[], None]] = None,
+        on_change: Callable[[], None] | None = None,
         **kwargs,
     ):
         kwargs.setdefault("fg_color", "transparent")
         super().__init__(parent, **kwargs)
         self.grid_columnconfigure(0, weight=1)
         self._on_change = on_change
+        self._radio_buttons: dict[str, ctk.CTkRadioButton] = {}
 
         # Emotion grid
         emotion_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -437,6 +439,7 @@ class EmotionPicker(ctk.CTkFrame):
                 command=self._changed,
             )
             rb.grid(row=i // 4, column=i % 4, padx=5, pady=3, sticky="w")
+            self._radio_buttons[emotion] = rb
 
         # Intensity
         intensity_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -447,10 +450,20 @@ class EmotionPicker(ctk.CTkFrame):
         self.intensity_var = ctk.DoubleVar(value=0.5)
         self.intensity_label = ctk.CTkLabel(intensity_frame, text="50%", width=50)
         self.intensity_label.grid(row=0, column=2, padx=(10, 0))
-        ctk.CTkSlider(
+        self.intensity_slider = ctk.CTkSlider(
             intensity_frame, from_=0.0, to=1.0, variable=self.intensity_var,
             command=self._on_intensity,
-        ).grid(row=0, column=1, sticky="ew", padx=10)
+        )
+        self.intensity_slider.grid(row=0, column=1, sticky="ew", padx=10)
+
+        self.capability_label = ctk.CTkLabel(
+            self,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color="gray",
+            anchor="w",
+        )
+        self.capability_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
 
     def _changed(self) -> None:
         if self._on_change:
@@ -463,3 +476,38 @@ class EmotionPicker(ctk.CTkFrame):
 
     def update_labels(self) -> None:
         self.intensity_label.configure(text=f"{int(self.intensity_var.get() * 100)}%")
+
+    def set_capability(
+        self,
+        emotion_support: str,
+        supported_emotions: list[str],
+        reason: str,
+    ) -> None:
+        """Update emotion control state from engine/voice capability metadata."""
+        available = emotion_support in ("native", "simulated")
+        supported = set(supported_emotions)
+
+        if not available:
+            self.emotion_var.set("neutral")
+            for rb in self._radio_buttons.values():
+                rb.configure(state="disabled", text_color_disabled="#6B7280")
+            self.intensity_slider.configure(state="disabled")
+            self.capability_label.configure(
+                text=f"Unavailable: {reason}",
+                text_color="#9CA3AF",
+            )
+            return
+
+        for emotion, rb in self._radio_buttons.items():
+            state = "normal" if not supported or emotion in supported else "disabled"
+            rb.configure(state=state)
+
+        if supported and self.emotion_var.get() not in supported:
+            self.emotion_var.set("neutral")
+
+        self.intensity_slider.configure(state="normal")
+        label = "Native" if emotion_support == "native" else "Simulated"
+        self.capability_label.configure(
+            text=f"{label}: {reason}",
+            text_color="#9CA3AF" if emotion_support == "simulated" else "#10B981",
+        )

@@ -5,7 +5,7 @@ A local-running MCP (Model Context Protocol) server that enables LLMs to convert
 ## Features
 
 - 🎙️ **Neural TTS**: High-quality text-to-speech using Piper TTS
-- 🎭 **Emotional Expression**: Support for 8 emotional tones (neutral, happy, sad, angry, excited, calm, fearful, surprised)
+- 🎭 **Emotion Controls**: Engine-reported emotion availability (`native`, `simulated`, or `unavailable`) with simulated prosody support where available
 - ⚡ **Real-time Controls**: Adjust speed, pitch, and emotion intensity on-the-fly
 - 🖥️ **GUI Monitoring**: CustomTkinter-based GUI with real-time log viewer
 - 🔧 **Extensive Logging**: Verbose debug output for easy troubleshooting
@@ -32,6 +32,21 @@ pip install -e .
 mcp-tts
 # or
 python -m mcp_tts.main
+```
+
+### Run with GUI and CUDA
+
+Double-click `Launch_MCP_TTS_CUDA.bat`, or run it from PowerShell/cmd. This uses
+a separate `.venv-cuda` environment, installs `mcp-tts[full]`, installs
+CUDA-enabled `torch`/`torchaudio`, sets `MCP_TTS_ENGINE=piper`, and prints a CUDA
+visibility check before starting the GUI.
+
+The launcher defaults to the PyTorch `cu128` wheel index. To use a different
+CUDA wheel index, set `MCP_TTS_CUDA_INDEX_URL` before launching:
+
+```bat
+set MCP_TTS_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu126
+Launch_MCP_TTS_CUDA.bat
 ```
 
 ### Run Server Only (for MCP clients)
@@ -63,9 +78,9 @@ Add to your Claude Desktop MCP configuration:
 |------|-------------|
 | `speak_text` | Convert text to speech with configurable parameters |
 | `set_voice` | Set the default voice model |
-| `set_emotion` | Set emotional expression and intensity |
-| `list_voices` | List available voice models |
-| `clone_voice` | Add a voice reference for cloning (Fish/XTTS) |
+| `set_emotion` | Set emotional expression and intensity when supported by the active voice |
+| `list_voices` | List available voice models and emotion capabilities |
+| `clone_voice` | Add a voice reference for cloning when an engine supports it |
 | `get_status` | Get current TTS engine status |
 | `get_gpu_status` | Get GPU availability and VRAM diagnostics |
 | `configure_tts` | Update TTS settings (speed, pitch, volume) |
@@ -73,7 +88,7 @@ Add to your Claude Desktop MCP configuration:
 ### Example Usage
 
 ```
-// Speak with happy emotion
+// Speak with happy emotion when the active voice reports support
 speak_text("Hello! I'm so glad to meet you!", emotion="happy", intensity=0.8)
 
 // Auto-route for low latency
@@ -85,7 +100,7 @@ set_voice("en_US-joe-medium")
 // Adjust speed and pitch
 configure_tts(speed=1.2, pitch=0.1)
 
-// Add a cloned voice reference (XTTS/Fish)
+// Add a cloned voice reference if the active engine supports cloning
 clone_voice("C:/voices/sample.wav", name="demo", prompt_text="Sample line", language="en")
 
 // Stream in chunks (long text)
@@ -121,10 +136,25 @@ Configuration is stored at `~/.mcp-tts/config.json`:
 Engine selection is controlled via environment variable:
 
 ```bash
-set MCP_TTS_ENGINE=fish
+set MCP_TTS_ENGINE=piper
 ```
 
-Supported engine values: `auto`, `fish`, `xtts`, `piper`, `system`.
+Supported engine values: `auto`, `edge`, `piper`, `system`.
+
+Emotion support is reported per voice in `list_voices`, `get_status`, and the
+`tts://voices` / `tts://emotions` resources:
+
+```json
+{
+  "emotion_support": "simulated",
+  "emotion_support_reason": "Piper emotion is simulated with speed and pitch changes.",
+  "supports_emotions": true,
+  "supported_emotions": ["neutral", "happy", "sad"]
+}
+```
+
+`supports_emotions` is retained for compatibility. New clients should prefer
+`emotion_support`, which can be `native`, `simulated`, or `unavailable`.
 
 You can also switch engines from the GUI settings panel or pass `engine` to `speak_text`.
 
@@ -141,53 +171,11 @@ Use `streaming=true` with `chunk_size` to stream long text in pieces for earlier
 Voice models are stored in `~/.mcp-tts/models/`. Download Piper voices from:
 https://github.com/rhasspy/piper/releases
 
-### Fish Speech (OpenAudio S1-mini)
+### Voice Cloning
 
-Fish Speech uses a local HTTP API server for inference. Start it in a separate terminal:
-
-```bash
-python -m tools.api_server \
-  --listen 127.0.0.1:8080 \
-  --llama-checkpoint-path "checkpoints/openaudio-s1-mini" \
-  --decoder-checkpoint-path "checkpoints/openaudio-s1-mini/codec.pth" \
-  --decoder-config-name modded_dac_vq
-```
-
-Then point MCP TTS at the API with environment variables:
-
-```bash
-set FISH_SPEECH_API_URL=http://127.0.0.1:8080
-```
-
-You can also auto-launch the Fish Speech API when starting MCP TTS:
-
-```bash
-set FISH_SPEECH_REPO=C:\GITHUB\FishSpeechServer
-mcp-tts
-```
-
-Or pass the repo path on the CLI:
-
-```bash
-mcp-tts --fish-repo C:\GITHUB\FishSpeechServer
-```
-
-### XTTS-v2 (Coqui TTS)
-
-Install dependencies:
-
-```bash
-pip install -e ".[xtts,gpu]"
-```
-
-Set engine and optional language override:
-
-```bash
-set MCP_TTS_ENGINE=xtts
-set XTTS_LANGUAGE=en
-```
-
-Use `clone_voice` to add a reference voice (XTTS requires a reference sample).
+The public MCP tool surface includes `clone_voice`, but the currently implemented
+engines (`edge`, `piper`, and `system`) do not expose cloning. Calls return an
+error unless a future engine implementation adds a real `clone_voice` method.
 
 ## Development
 

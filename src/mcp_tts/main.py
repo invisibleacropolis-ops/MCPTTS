@@ -14,7 +14,7 @@ from pathlib import Path
 
 from mcp_tts import __version__
 from mcp_tts.utils.config import Config
-from mcp_tts.utils.logging import setup_logging, get_logger
+from mcp_tts.utils.logging import get_logger, setup_logging
 
 
 def parse_args() -> argparse.Namespace:

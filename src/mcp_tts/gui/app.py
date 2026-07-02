@@ -10,25 +10,26 @@ Features:
 - Synthesis activity indicator
 """
 
+from __future__ import annotations
+
 import asyncio
 import subprocess
 import sys
 import threading
 from multiprocessing import Queue
 from pathlib import Path
-from typing import Optional
 
 import customtkinter as ctk
 
 from mcp_tts.gui.log_viewer import LogViewer
 from mcp_tts.gui.settings import SettingsPanel
-from mcp_tts.gui.widgets import ToastBar, StatusIndicator, EngineStatusPanel
-from mcp_tts.utils.config import Config, TTSSettings
-from mcp_tts.utils.logging import setup_logging, get_logger
-from mcp_tts.utils.gpu import get_gpu_manager
+from mcp_tts.gui.widgets import EngineStatusPanel, StatusIndicator, ToastBar
+from mcp_tts.tts.audio import AudioPlayer, apply_audio_effects
 from mcp_tts.tts.engine import TTSEngine
 from mcp_tts.tts.manager import EngineManager
-from mcp_tts.tts.audio import AudioPlayer, apply_audio_effects
+from mcp_tts.utils.config import Config, TTSSettings
+from mcp_tts.utils.gpu import get_gpu_manager
+from mcp_tts.utils.logging import get_logger, setup_logging
 
 # Configure appearance
 ctk.set_appearance_mode("dark")
@@ -70,8 +71,8 @@ class ControlPanel(ctk.CTkFrame):
     def __init__(
         self,
         parent,
-        on_start: Optional[callable] = None,
-        on_stop: Optional[callable] = None,
+        on_start: callable | None = None,
+        on_stop: callable | None = None,
         **kwargs,
     ):
         super().__init__(parent, **kwargs)
@@ -221,10 +222,10 @@ class MCPTTSApp(ctk.CTk):
         setup_logging(gui_queue=self.log_queue, verbose=True)
 
         # Server process reference
-        self.server_process: Optional[subprocess.Popen] = None
+        self.server_process: subprocess.Popen | None = None
 
         # TTS engine for preview (lazy initialized)
-        self._tts_engine: Optional[TTSEngine] = None
+        self._tts_engine: TTSEngine | None = None
         self._tts_engine_initializing = False
         self._audio_player = AudioPlayer()
         self._gpu_manager = get_gpu_manager()
@@ -312,7 +313,7 @@ class MCPTTSApp(ctk.CTk):
         if settings.engine != self._current_engine_key:
             self._init_tts_engine(settings.engine)
 
-    def _init_tts_engine(self, preferred_engine: Optional[str] = None):
+    def _init_tts_engine(self, preferred_engine: str | None = None):
         """Initialize TTS engine in background thread."""
         if self._tts_engine_initializing:
             return
@@ -346,7 +347,13 @@ class MCPTTSApp(ctk.CTk):
             except Exception as e:
                 logger.error(f"Failed to initialize TTS engine {engine_key}: {e}")
                 self.after(0, lambda: self.status_indicator.set_state("error", "Engine failed"))
-                self.after(0, lambda: self.toast.show_error(f"Engine '{engine_key}' failed: {e}"))
+                error_message = str(e)
+                self.after(
+                    0,
+                    lambda msg=error_message: self.toast.show_error(
+                        f"Engine '{engine_key}' failed: {msg}"
+                    ),
+                )
             finally:
                 self._tts_engine_initializing = False
 
@@ -392,8 +399,7 @@ class MCPTTSApp(ctk.CTk):
                 finally:
                     loop.close()
 
-                voice_ids = [voice.id for voice in voices]
-                self.after(0, lambda: self.settings_panel.update_voices(voice_ids))
+                self.after(0, lambda: self.settings_panel.update_voice_infos(voices))
             except Exception as e:
                 logger.warning(f"Failed to refresh voice list: {e}")
 
@@ -449,7 +455,11 @@ class MCPTTSApp(ctk.CTk):
             except Exception as e:
                 logger.error(f"Preview failed: {e}")
                 self.after(0, lambda: self.status_indicator.set_state("error"))
-                self.after(0, lambda: self.toast.show_error(f"Preview failed: {e}"))
+                error_message = str(e)
+                self.after(
+                    0,
+                    lambda msg=error_message: self.toast.show_error(f"Preview failed: {msg}"),
+                )
 
         threading.Thread(target=run_preview, daemon=True).start()
 
@@ -481,10 +491,19 @@ class MCPTTSApp(ctk.CTk):
                     loop.close()
 
                 self._refresh_voice_list()
-                self.after(0, lambda: self.toast.show_success(f"Voice '{name}' cloned successfully"))
+                self.after(
+                    0,
+                    lambda: self.toast.show_success(f"Voice '{name}' cloned successfully"),
+                )
             except Exception as e:
                 logger.error(f"Voice cloning failed: {e}")
-                self.after(0, lambda: self.toast.show_error(f"Voice cloning failed: {e}"))
+                error_message = str(e)
+                self.after(
+                    0,
+                    lambda msg=error_message: self.toast.show_error(
+                        f"Voice cloning failed: {msg}"
+                    ),
+                )
 
         threading.Thread(target=run_clone, daemon=True).start()
 

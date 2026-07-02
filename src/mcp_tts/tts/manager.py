@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from mcp_tts.tts.engine import TTSEngine, TTSEngineType, create_engine, resolve_engine_type
 from mcp_tts.utils.gpu import get_gpu_manager
@@ -46,10 +45,10 @@ class EngineManager:
             TTSEngineType.PIPER,  # Fallback - local neural TTS
             TTSEngineType.SYSTEM, # Last resort - Windows SAPI
         ]
-        self._current_engine: Optional[TTSEngineType] = None
+        self._current_engine: TTSEngineType | None = None
 
     @property
-    def current_engine(self) -> Optional[TTSEngineType]:
+    def current_engine(self) -> TTSEngineType | None:
         return self._current_engine
 
     def set_default_engine(self, engine_type: TTSEngineType) -> None:
@@ -57,8 +56,8 @@ class EngineManager:
 
     async def get_engine(
         self,
-        preferred: Optional[str] = None,
-        task: Optional[str] = None,
+        preferred: str | None = None,
+        task: str | None = None,
     ) -> TTSEngine:
         preferred_type = None
         if preferred and preferred.lower() != "auto":
@@ -85,7 +84,7 @@ class EngineManager:
             await self._unload_engine(engine_type)
 
     def _build_priority(
-        self, preferred: Optional[TTSEngineType], task: Optional[str]
+        self, preferred: TTSEngineType | None, task: str | None
     ) -> list[TTSEngineType]:
         # Task-based priority (simplified - only piper and system now)
         if task == "fast":
@@ -111,7 +110,7 @@ class EngineManager:
                 seen.add(item)
         return ordered
 
-    async def _ensure_engine(self, engine_type: TTSEngineType) -> Optional[TTSEngine]:
+    async def _ensure_engine(self, engine_type: TTSEngineType) -> TTSEngine | None:
         record = self._engines.get(engine_type)
         if record:
             record.last_used = time.monotonic()
